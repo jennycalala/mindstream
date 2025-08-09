@@ -20,3 +20,9 @@ __pycache__/
 
 # Byte-compiled / optimized / DLL files
 *.so
+
+# Project outputs
+cache/images/
+.daily_vibe_cache.json
+out.png
+*_prompt.txt
