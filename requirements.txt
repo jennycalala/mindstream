@@ -1,0 +1,21 @@
+# Core data handling
+pandas
+numpy
+python-dateutil
+scikit-learn
+
+# Web scraping & text extraction
+requests
+trafilatura
+beautifulsoup4
+lxml
+
+# Sentiment analysis (abstract mode)
+vaderSentiment
+
+# Image handling & palette extraction
+Pillow
+colorthief
+
+# OpenAI GPT + image generation
+openai>=1.0.0
