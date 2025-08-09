@@ -1,6 +1,26 @@
 #!/usr/bin/env python3
 """
-Daily Vibe Art — GPT-powered, JSON/CSV, cached, Windows-friendly
+Daily Vibe Art — GPT-powered, JSON/CSV, cached
+
+USAGE (macOS/Linux bash or zsh):
+    # 1) Create & activate venv
+    python3 -m venv .venv
+    source .venv/bin/activate
+
+    # 2) Install deps
+    pip install -r requirements.txt
+
+    # 3) Optional: set your key (not required for --dry-run)
+    export OPENAI_API_KEY="sk-..."
+
+    # 4) Run (JSON or CSV)
+    python mindstream_art.py history.json \
+      --date 2025-08-07 \
+      --mode hybrid \
+      --style realistic \
+      --seed 42 \
+      --out out.png \
+      --log
 
 USAGE (Windows PowerShell):
     # 1) Create & activate venv
@@ -10,16 +30,29 @@ USAGE (Windows PowerShell):
     # 2) Install deps
     pip install -r requirements.txt
 
-    # 3) Set your key
+    # 3) Optional: set your key (not required for --dry-run)
     $env:OPENAI_API_KEY = "sk-..."
 
     # 4) Run (JSON or CSV)
-    py .\daily_vibe_art.py .\history.json --date 2025-08-07 --mode hybrid --out .\out.png --log
+    py .\mindstream_art.py .\history.json \
+      --date 2025-08-07 \
+      --mode hybrid \
+      --style realistic \
+      --seed 42 \
+      --out .\out.png \
+      --log
 
 MODES:
-    abstract  - Local flow-field generative art themed by GPT daily prompt (no remote image).
-    gpt       - GPT-generated abstract image only.
-    hybrid    - GPT image + local flow-field overlay (palette from GPT image).
+    abstract  - Local flow-field generative art themed by a daily prompt (no remote image).
+    gpt       - GPT-generated image only.
+    hybrid    - Combines GPT image and local overlay. For non-abstract styles, uses GPT image directly.
+
+KEY FLAGS:
+    --style           abstract | figurative | realistic (less abstract → figurative/realistic)
+    --seed            Seed for variation/repro; also tags GPT prompt to nudge uniqueness
+    --refresh-cache   Re-summarize all pages (ignore .daily_vibe_cache.json)
+    --refresh-image   Force regenerate GPT image (ignore cached image file)
+    --dry-run         No GPT calls; quick test path
 
 DEPENDENCIES (see requirements.txt):
     pandas, numpy, python-dateutil, scikit-learn,
@@ -31,10 +64,11 @@ NOTES:
 - Uses OpenAI Python SDK 1.x pattern (from openai import OpenAI; client = OpenAI()).
 - gpt-image-1 returns base64; we decode and save locally.
 - Caches page summaries in .daily_vibe_cache.json
-- Always regenerates GPT image in hybrid mode (and saves to cache/images/YYYY-MM-DD_gpt.png)
+- GPT image cache path: cache/images/YYYY-MM-DD_gpt_<style>[_<seed>].png
+- --dry-run requires no API key and writes a stub image and prompt
 """
 
-import os, sys, json, argparse, hashlib, random, base64
+import os, sys, json, argparse, hashlib, random, base64, shutil
 from io import BytesIO
 from datetime import datetime, timezone
 from typing import List, Tuple
@@ -132,58 +166,132 @@ def fetch_page_text(url: str, log_enabled=False) -> str:
         return ""
 
 # --------------- GPT helpers (text) -----------------
-def gpt_summarize_page(client: OpenAI, text: str, title: str, url: str, log_enabled=False) -> str:
+def gpt_summarize_page(
+    client: OpenAI,
+    text: str,
+    title: str,
+    url: str,
+    style: str,
+    log_enabled: bool = False,
+) -> str:
     log(f"Summarizing via GPT: {title or url}", log_enabled)
-    system_prompt = (
-        "You are an abstract art inspiration assistant. "
-        "From this page’s text, describe non-literal shapes, colors, and moods for abstract art. "
-        "Avoid copying identifiable characters, logos, or literal brand imagery. "
-        "Return 1–2 sentences."
-    )
-    user_prompt = f"Title: {title}\nURL: {url}\nContent:\n{text[:8000]}\n\nAbstract art inspiration:"
+
+    style = (style or "figurative").lower()
+    if style == "abstract":
+        system_prompt = (
+            "You are an abstract art inspiration assistant. "
+            "From this page’s text, describe non-literal shapes, colors, and moods for abstract art. "
+            "Avoid copying identifiable characters, logos, or literal brand imagery. "
+            "Return 1–2 sentences."
+        )
+        user_prompt = (
+            f"Title: {title}\nURL: {url}\nContent:\n{text[:8000]}\n\nAbstract art inspiration:"
+        )
+        temperature = 0.7
+    else:
+        realism_hint = (
+            "photo-realistic, natural lighting, optical realism, detailed textures"
+            if style == "realistic"
+            else "representational, coherent scene, clear subjects"
+        )
+        system_prompt = (
+            "You are a visual scene summarizer. "
+            "From the page text, extract concrete visual elements: settings, key objects, activities, time of day, and mood. "
+            "Compose a single depictable scene with specific nouns and adjectives. "
+            "Avoid brand logos and identifiable real people. Keep it concise (1–2 sentences)."
+        )
+        user_prompt = (
+            f"Title: {title}\nURL: {url}\nContent (truncated):\n{text[:8000]}\n\n"
+            f"Describe a specific scene to depict ({realism_hint}):"
+        )
+        temperature = 0.4
+
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.7,
+        temperature=temperature,
     )
     return resp.choices[0].message.content.strip()
 
-def gpt_merge_daily_prompt(client: OpenAI, page_summaries: List[str], log_enabled=False) -> str:
+def gpt_merge_daily_prompt(
+    client: OpenAI,
+    page_summaries: List[str],
+    style: str,
+    log_enabled: bool = False,
+) -> str:
     log("Merging daily concept via GPT…", log_enabled)
-    system_prompt = (
-        "You are an abstract art concept creator. "
-        "From the following abstract inspirations, create ONE cohesive abstract art prompt "
-        "that captures the dominant mood, shapes, and colors for a single daily artwork. "
-        "Keep it non-literal and avoid brand characters/logos."
-    )
-    joined = "\n".join(f"- {s}" for s in page_summaries)
-    user_prompt = f"Abstract inspirations:\n{joined}\n\nFinal daily abstract art prompt:"
+    style = (style or "figurative").lower()
+    if style == "abstract":
+        system_prompt = (
+            "You are an abstract art concept creator. "
+            "From the following abstract inspirations, create ONE cohesive abstract art prompt "
+            "that captures the dominant mood, shapes, and colors for a single daily artwork. "
+            "Keep it non-literal and avoid brand characters/logos."
+        )
+        joined = "\n".join(f"- {s}" for s in page_summaries)
+        user_prompt = f"Abstract inspirations:\n{joined}\n\nFinal daily abstract art prompt:"
+        temperature = 0.7
+    else:
+        realism_hint = (
+            "photo-realistic, crisp details, natural lighting, realistic materials"
+            if style == "realistic"
+            else "representational, tangible subjects, coherent composition"
+        )
+        system_prompt = (
+            "You are a scene prompt engineer. "
+            "From the notes below, produce ONE concrete, depictable scene prompt for an image generator. "
+            "Specify: setting/environment, key subjects, actions, time of day/lighting, color palette, camera/composition hints. "
+            "Avoid brand logos and identifiable real people. "
+            f"Style emphasis: {realism_hint}."
+        )
+        joined = "\n".join(f"- {s}" for s in page_summaries)
+        user_prompt = f"Notes:\n{joined}\n\nFinal single-scene prompt:"
+        temperature = 0.4
+
     resp = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
-        temperature=0.8,
+        temperature=temperature,
     )
     return resp.choices[0].message.content.strip()
 
 # -------------- GPT image generation ----------------
-def gpt_generate_image(client: OpenAI, prompt: str, out_path: str, log_enabled=False):
+def gpt_generate_image(
+    client: OpenAI,
+    prompt: str,
+    out_path: str,
+    style: str,
+    force_regen: bool = False,
+    log_enabled: bool = False,
+):
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    log("Generating abstract image via gpt-image-1…", log_enabled)
+    style = (style or "figurative").lower()
+    style_prefix = ""
+    if style == "realistic":
+        style_prefix = (
+            "Photo-realistic depiction, lifelike textures, natural lighting, accurate proportions. "
+        )
+    elif style == "figurative":
+        style_prefix = (
+            "Representational scene with clear subjects and environment. "
+        )
+    log("Generating image via gpt-image-1…", log_enabled)
 
     # Determine best size based on desired output dimensions (default to wide)
-    try:
-        # If file already exists and is not empty, skip
-        if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
-            log(f"Using cached image → {out_path}", log_enabled)
-            return out_path
-    except Exception:
-        pass
+    if not force_regen:
+        try:
+            # If file already exists and is not empty, skip
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+                log(f"Using cached image → {out_path}", log_enabled)
+                return out_path
+        except Exception:
+            pass
 
     # Guess output aspect ratio from filename pattern or default
     width, height = 1536, 1024  # default wide
@@ -205,7 +313,7 @@ def gpt_generate_image(client: OpenAI, prompt: str, out_path: str, log_enabled=F
 
     result = client.images.generate(
         model="gpt-image-1",
-        prompt=prompt,
+        prompt=f"{style_prefix}{prompt}",
         size=size_str,
     )
     b64 = result.data[0].b64_json
@@ -221,13 +329,20 @@ def extract_palette(image_path: str, num_colors: int = 5) -> List[Tuple[int,int,
         return ct.get_palette(color_count=num_colors)
 
 # -------- Flow-field (simple, Windows-safe) ---------
-def generate_flow_field_image(size, palette, out_path, overlay_path=None, overlay_opacity=128):
+def generate_flow_field_image(
+    size,
+    palette,
+    out_path,
+    overlay_path=None,
+    overlay_opacity=128,
+    seed: int = None,
+):
     w, h = size
     base = Image.new("RGB", (w, h), (250, 250, 250))
     draw = ImageDraw.Draw(base)
 
-    # simple seeded randomness for determinism
-    rnd = random.Random(42)
+    # simple seeded randomness for determinism (overridable via --seed)
+    rnd = random.Random(42 if seed is None else int(seed))
     for _ in range(3000):
         x, y = rnd.randint(0, w), rnd.randint(0, h)
         dx, dy = rnd.randint(-12, 12), rnd.randint(-12, 12)
@@ -245,22 +360,42 @@ def generate_flow_field_image(size, palette, out_path, overlay_path=None, overla
 
 # ------------------------- Main ---------------------
 def main():
-    ap = argparse.ArgumentParser(description="Generate daily abstract art from browser history")
+    ap = argparse.ArgumentParser(description="Generate daily scene art from browser history")
     ap.add_argument("history", help="Path to history JSON or CSV")
     ap.add_argument("--date", required=True, help="YYYY-MM-DD")
     ap.add_argument("--mode", choices=["abstract", "gpt", "hybrid"], default="hybrid")
+    ap.add_argument(
+        "--style",
+        choices=["abstract", "figurative", "realistic"],
+        default="figurative",
+        help=(
+            "Art style guidance for GPT prompting and hybrid overlay behavior. "
+            "'figurative' and 'realistic' produce less abstract, more depictable images."
+        ),
+    )
+    ap.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="Seed for generative randomness. Use same seed for repeatable results; change for variation.",
+    )
     ap.add_argument("--out", required=True, help="Output PNG path")
     ap.add_argument("--refresh-cache", action="store_true", help="Re-summarize all pages (ignore cache)")
+    ap.add_argument(
+        "--refresh-image",
+        action="store_true",
+        help="Force regenerate GPT image (ignore cached image file)",
+    )
     ap.add_argument("--log", action="store_true", help="Print progress logs")
     ap.add_argument("--dry-run", action="store_true", help="Skip GPT calls; stub summaries for testing")
     args = ap.parse_args()
 
-    # OpenAI client
+    # OpenAI client (allow dry-run without a key)
     api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
+    if not api_key and not args.dry_run:
         sys.stderr.write("Error: OPENAI_API_KEY not set.\n")
         sys.exit(2)
-    client = OpenAI(api_key=api_key)
+    client = OpenAI(api_key=api_key) if api_key else None
 
     # Load data
     df = load_history(args.history, log_enabled=args.log)
@@ -289,8 +424,17 @@ def main():
             summary = cache[key]
             log(f"[cache] {title or url}", args.log)
         else:
-            text = fetch_page_text(url, log_enabled=args.log)
-            summary = gpt_summarize_page(client, text, title, url, log_enabled=args.log)
+            if args.dry_run:
+                text = ""
+            else:
+                text = fetch_page_text(url, log_enabled=args.log)
+            summary = (
+                f"Scene idea from: {title or url}"
+                if args.dry_run
+                else gpt_summarize_page(
+                    client, text, title, url, args.style, log_enabled=args.log
+                )
+            )
             cache[key] = summary
 
         page_summaries.append(summary)
@@ -299,11 +443,12 @@ def main():
         save_cache(cache)
 
     # Merge into daily prompt
-    daily_prompt = (
-        " | ".join(page_summaries)
-        if args.dry_run
-        else gpt_merge_daily_prompt(client, page_summaries, log_enabled=args.log)
-    )
+    if args.dry_run:
+        daily_prompt = " | ".join(page_summaries)
+    else:
+        daily_prompt = gpt_merge_daily_prompt(
+            client, page_summaries, args.style, log_enabled=args.log
+        )
 
     # Save prompt next to output
     prompt_txt_path = os.path.splitext(args.out)[0] + "_prompt.txt"
@@ -312,21 +457,40 @@ def main():
 
     # Ensure image cache dir
     os.makedirs(IMAGE_CACHE_DIR, exist_ok=True)
-    gpt_img_cache = os.path.join(IMAGE_CACHE_DIR, f"{target_date}_gpt.png")
+    # Separate cache filename by style and seed so variations don't collide
+    seed_tag = f"_{args.seed}" if args.seed is not None else ""
+    gpt_img_cache = os.path.join(
+        IMAGE_CACHE_DIR, f"{target_date}_gpt_{args.style}{seed_tag}.png"
+    )
 
     if args.mode == "gpt":
         if args.dry_run:
             # stub image
-            generate_flow_field_image((1920, 1080), [(200, 200, 200)] * 5, args.out)
+            generate_flow_field_image((1920, 1080), [(200, 200, 200)] * 5, args.out, seed=args.seed)
         else:
-            gpt_generate_image(client, daily_prompt, args.out, log_enabled=args.log)
+            # Add seed-based variation tag to prompt so GPT image differs by seed
+            prompt_with_variation = (
+                f"{daily_prompt} [variation:{args.seed}]" if args.seed is not None else daily_prompt
+            )
+            gpt_generate_image(
+                client,
+                prompt_with_variation,
+                args.out,
+                args.style,
+                force_regen=args.refresh_image,
+                log_enabled=args.log,
+            )
 
     elif args.mode == "abstract":
-        # Deterministic palette from prompt hash
-        seed = int(hashlib.sha1(daily_prompt.encode("utf-8")).hexdigest()[:8], 16)
-        rnd = random.Random(seed)
+        # Deterministic palette from prompt hash (overridable via --seed)
+        derived_seed = (
+            int(hashlib.sha1(daily_prompt.encode("utf-8")).hexdigest()[:8], 16)
+            if args.seed is None
+            else args.seed
+        )
+        rnd = random.Random(derived_seed)
         palette = [(rnd.randrange(40, 220), rnd.randrange(40, 220), rnd.randrange(40, 220)) for _ in range(5)]
-        generate_flow_field_image((1920, 1080), palette, args.out)
+        generate_flow_field_image((1920, 1080), palette, args.out, seed=args.seed)
 
     elif args.mode == "hybrid":
         if args.dry_run:
@@ -334,10 +498,36 @@ def main():
             palette = [(60,120,200), (200,80,120), (120,200,100), (80,80,180), (180,160,90)]
             generate_flow_field_image((1920, 1080), palette, args.out)
         else:
-            # Always regenerate GPT image, then extract palette and overlay generative lines
-            gpt_generate_image(client, daily_prompt, gpt_img_cache, log_enabled=args.log)
-            palette = extract_palette(gpt_img_cache, num_colors=6)
-            generate_flow_field_image((1920, 1080), palette, args.out, overlay_path=gpt_img_cache, overlay_opacity=128)
+            # Always regenerate GPT image, then either overlay (abstract) or use directly (non-abstract)
+            # Add seed-based variation tag to prompt so GPT image differs by seed
+            prompt_with_variation = (
+                f"{daily_prompt} [variation:{args.seed}]" if args.seed is not None else daily_prompt
+            )
+            gpt_generate_image(
+                client,
+                prompt_with_variation,
+                gpt_img_cache,
+                args.style,
+                force_regen=args.refresh_image,
+                log_enabled=args.log,
+            )
+            if args.style == "abstract":
+                palette = extract_palette(gpt_img_cache, num_colors=6)
+                generate_flow_field_image(
+                    (1920, 1080),
+                    palette,
+                    args.out,
+                    overlay_path=gpt_img_cache,
+                    overlay_opacity=128,
+                    seed=args.seed,
+                )
+            else:
+                # In non-abstract styles, avoid abstract overlays; use the GPT image directly
+                try:
+                    shutil.copyfile(gpt_img_cache, args.out)
+                except Exception:
+                    # Fallback: open and resave to ensure correct path
+                    Image.open(gpt_img_cache).convert("RGB").save(args.out, "PNG")
 
     log(f"Saved image → {args.out}", args.log)
     log(f"Saved prompt → {prompt_txt_path}", args.log)
