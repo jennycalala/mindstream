@@ -53,11 +53,31 @@ python mindstream_art.py history.json \
   --seed 42 \
   --out out.png \
   --log
+
+# Or auto-read Chrome history directly (no file needed; Chrome must be closed)
+python mindstream_art.py \
+  --auto-history chrome \
+  --date 2025-08-07 \
+  --mode hybrid \
+  --style realistic \
+  --seed 42 \
+  --out out.png \
+  --log
 ```
 
 ### Windows PowerShell
 ```powershell
 py .\mindstream_art.py .\history.json \
+  --date 2025-08-07 \
+  --mode hybrid \
+  --style realistic \
+  --seed 42 \
+  --out .\out.png \
+  --log
+
+# Or auto-read Chrome history directly (no file needed; Chrome must be closed)
+py .\mindstream_art.py \
+  --auto-history chrome \
   --date 2025-08-07 \
   --mode hybrid \
   --style realistic \

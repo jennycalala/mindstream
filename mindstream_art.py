@@ -22,6 +22,16 @@ USAGE (macOS/Linux bash or zsh):
       --out out.png \
       --log
 
+    # Or auto-read Chrome history directly (no file needed; Chrome must be closed)
+    python mindstream_art.py \
+      --auto-history chrome \
+      --date 2025-08-07 \
+      --mode hybrid \
+      --style realistic \
+      --seed 42 \
+      --out out.png \
+      --log
+
 USAGE (Windows PowerShell):
     # 1) Create & activate venv
     py -3 -m venv .venv
@@ -35,6 +45,16 @@ USAGE (Windows PowerShell):
 
     # 4) Run (JSON or CSV)
     py .\mindstream_art.py .\history.json \
+      --date 2025-08-07 \
+      --mode hybrid \
+      --style realistic \
+      --seed 42 \
+      --out .\out.png \
+      --log
+
+    # Or auto-read Chrome history directly (no file needed; Chrome must be closed)
+    py .\mindstream_art.py \
+      --auto-history chrome \
       --date 2025-08-07 \
       --mode hybrid \
       --style realistic \
@@ -68,9 +88,9 @@ NOTES:
 - --dry-run requires no API key and writes a stub image and prompt
 """
 
-import os, sys, json, argparse, hashlib, random, base64, shutil
+import os, sys, json, argparse, hashlib, random, base64, shutil, sqlite3, tempfile
 from io import BytesIO
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import List, Tuple
 
 import requests
@@ -151,6 +171,69 @@ def load_history(path: str, log_enabled=False) -> pd.DataFrame:
     # Ensure datetimelike dtype for .dt accessor
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce", utc=False)
     df = df.dropna(subset=["datetime"])
+    return df
+
+# --------- Chrome history (auto-ingest, Windows) ----------
+def _find_chrome_history_path(log_enabled=False) -> str:
+    base = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data")
+    if not os.path.isdir(base):
+        raise FileNotFoundError("Chrome user data folder not found")
+    # Prefer Default, then any Profile*
+    candidates = ["Default"] + [d for d in os.listdir(base) if d.startswith("Profile")]
+    for profile in candidates:
+        hist_path = os.path.join(base, profile, "History")
+        if os.path.exists(hist_path):
+            return hist_path
+    raise FileNotFoundError("Chrome history DB not found in any profile")
+
+def _chrome_timestamp_to_datetime(visit_time_us: int) -> datetime:
+    # Chrome stores timestamps as microseconds since 1601-01-01 UTC
+    epoch_1601 = datetime(1601, 1, 1, tzinfo=timezone.utc)
+    return epoch_1601 + timedelta(microseconds=int(visit_time_us))
+
+def load_chrome_history(limit: int = 20000, log_enabled: bool = False) -> pd.DataFrame:
+    """Read Chrome's SQLite History safely by copying to a temp dir.
+
+    Returns a DataFrame with columns: url, title, datetime (tz-aware UTC).
+    """
+    hist_src = _find_chrome_history_path(log_enabled=log_enabled)
+    log(f"Chrome History DB → {hist_src}", log_enabled)
+    with tempfile.TemporaryDirectory() as td:
+        tmp_db = os.path.join(td, "History")
+        try:
+            shutil.copy2(hist_src, tmp_db)
+        except Exception as e:
+            # If Chrome is open the file may be locked; still often copyable, but if not, fail clearly
+            raise RuntimeError(f"Failed to copy Chrome History DB: {e}")
+        con = sqlite3.connect(tmp_db)
+        try:
+            cur = con.cursor()
+            cur.execute(
+                """
+                SELECT urls.url, urls.title, visits.visit_time
+                FROM visits JOIN urls ON visits.url = urls.id
+                WHERE urls.url LIKE 'http%'
+                ORDER BY visits.visit_time DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            )
+            rows = cur.fetchall()
+        finally:
+            con.close()
+
+    records = []
+    for url, title, visit_us in rows:
+        try:
+            dt = _chrome_timestamp_to_datetime(int(visit_us))
+        except Exception:
+            continue
+        records.append({"title": title or "", "url": url or "", "datetime": dt})
+
+    df = pd.DataFrame(records)
+    if not df.empty:
+        df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce", utc=False)
+        df = df.dropna(subset=["datetime"])
     return df
 
 # --------------- Web fetch & clean ------------------
@@ -361,7 +444,7 @@ def generate_flow_field_image(
 # ------------------------- Main ---------------------
 def main():
     ap = argparse.ArgumentParser(description="Generate daily scene art from browser history")
-    ap.add_argument("history", help="Path to history JSON or CSV")
+    ap.add_argument("history", nargs="?", help="Path to history JSON or CSV (omit with --auto-history chrome)")
     ap.add_argument("--date", required=True, help="YYYY-MM-DD")
     ap.add_argument("--mode", choices=["abstract", "gpt", "hybrid"], default="hybrid")
     ap.add_argument(
@@ -388,6 +471,8 @@ def main():
     )
     ap.add_argument("--log", action="store_true", help="Print progress logs")
     ap.add_argument("--dry-run", action="store_true", help="Skip GPT calls; stub summaries for testing")
+    ap.add_argument("--auto-history", choices=["chrome"], help="Auto-ingest history from a browser (e.g. chrome)")
+    ap.add_argument("--history-limit", type=int, default=20000, help="Max rows to read from auto browser history")
     args = ap.parse_args()
 
     # OpenAI client (allow dry-run without a key)
@@ -398,7 +483,20 @@ def main():
     client = OpenAI(api_key=api_key) if api_key else None
 
     # Load data
-    df = load_history(args.history, log_enabled=args.log)
+    if args.auto_history == "chrome":
+        try:
+            df = load_chrome_history(limit=args.history_limit, log_enabled=args.log)
+        except Exception as e:
+            sys.stderr.write(f"Failed to read Chrome history: {e}\n")
+            sys.exit(2)
+        if df.empty:
+            sys.stderr.write("No Chrome history rows loaded. Ensure Chrome is closed and try again.\n")
+            sys.exit(1)
+    else:
+        if not args.history:
+            sys.stderr.write("Provide a history file or use --auto-history chrome.\n")
+            sys.exit(2)
+        df = load_history(args.history, log_enabled=args.log)
     target_date = dateparser.parse(args.date).date()
 
     # Ensure datetimelike and filter by date
