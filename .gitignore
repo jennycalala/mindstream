@@ -22,7 +22,6 @@ __pycache__/
 *.so
 
 # Project outputs
-cache/images/
 .daily_vibe_cache.json
 .mindstream_cache.json
 out.png
