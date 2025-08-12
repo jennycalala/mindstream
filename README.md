@@ -1,4 +1,4 @@
-# Mindstream Art
+# Mindstream
 
 Generate daily art guided by your browsing history using GPT for prompts and images, with optional local generative overlays. Supports JSON/CSV history inputs, caching, and cross-platform usage.
 
@@ -94,12 +94,12 @@ py .\mindstream_art.py \
 ## Key Flags
 - `--style` `abstract|figurative|realistic`: Controls prompt guidance and hybrid behavior. Use `figurative`/`realistic` for less abstract outputs.
 - `--seed` `<int>`: Seed for reproducibility/variation. Also tags the GPT prompt to nudge unique generations per seed.
-- `--refresh-cache`: Re-summarize pages (ignore `.daily_vibe_cache.json`).
+- `--refresh-cache`: Re-summarize pages (ignore `.mindstream_cache.json`).
 - `--refresh-image`: Force regenerate GPT image (ignore existing cached image file).
 - `--dry-run`: Skips GPT calls; writes a stub image and prompt for quick testing.
 
 ## Caching
-- Page summaries: `.daily_vibe_cache.json`
+- Page summaries: `.mindstream_cache.json`
 - GPT images: `cache/images/YYYY-MM-DD_gpt_<style>[_<seed>].png`
 
 ## Examples

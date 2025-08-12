@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Daily Vibe Art — GPT-powered, JSON/CSV, cached
+Mindstream — GPT-powered, JSON/CSV, cached
 
 USAGE (macOS/Linux bash or zsh):
     # 1) Create & activate venv
@@ -70,7 +70,7 @@ MODES:
 KEY FLAGS:
     --style           abstract | figurative | realistic (less abstract → figurative/realistic)
     --seed            Seed for variation/repro; also tags GPT prompt to nudge uniqueness
-    --refresh-cache   Re-summarize all pages (ignore .daily_vibe_cache.json)
+    --refresh-cache   Re-summarize all pages (ignore .mindstream_cache.json)
     --refresh-image   Force regenerate GPT image (ignore cached image file)
     --dry-run         No GPT calls; quick test path
 
@@ -83,7 +83,7 @@ DEPENDENCIES (see requirements.txt):
 NOTES:
 - Uses OpenAI Python SDK 1.x pattern (from openai import OpenAI; client = OpenAI()).
 - gpt-image-1 returns base64; we decode and save locally.
-- Caches page summaries in .daily_vibe_cache.json
+- Caches page summaries in .mindstream_cache.json
 - GPT image cache path: cache/images/YYYY-MM-DD_gpt_<style>[_<seed>].png
 - --dry-run requires no API key and writes a stub image and prompt
 """
@@ -110,7 +110,8 @@ except Exception:
     print("Error: OpenAI SDK not installed or too old. Run: pip install 'openai>=1.0.0'", file=sys.stderr)
     sys.exit(2)
 
-CACHE_FILE = ".daily_vibe_cache.json"
+CACHE_FILE = ".mindstream_cache.json"
+LEGACY_CACHE_FILE = ".daily_vibe_cache.json"
 IMAGE_CACHE_DIR = os.path.join("cache", "images")
 
 # ---------------------- Logging ----------------------
@@ -123,6 +124,13 @@ def load_cache():
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+    # Fallback to legacy cache filename, if present
+    if os.path.exists(LEGACY_CACHE_FILE):
+        try:
+            with open(LEGACY_CACHE_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception:
             return {}
