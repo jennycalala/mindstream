@@ -24,5 +24,6 @@ __pycache__/
 # Project outputs
 cache/images/
 .daily_vibe_cache.json
+.mindstream_cache.json
 out.png
 *_prompt.txt
