@@ -1,4 +1,4 @@
-# Mindstream Art
+# Mindstream
 
 Generate daily art guided by your browsing history using GPT for prompts and images, with optional local generative overlays. Supports JSON/CSV history inputs, caching, and cross-platform usage.
 
@@ -53,11 +53,31 @@ python mindstream_art.py history.json \
   --seed 42 \
   --out out.png \
   --log
+
+# Or auto-read Chrome history directly (no file needed; Chrome must be closed)
+python mindstream_art.py \
+  --auto-history chrome \
+  --date 2025-08-07 \
+  --mode hybrid \
+  --style realistic \
+  --seed 42 \
+  --out out.png \
+  --log
 ```
 
 ### Windows PowerShell
 ```powershell
 py .\mindstream_art.py .\history.json \
+  --date 2025-08-07 \
+  --mode hybrid \
+  --style realistic \
+  --seed 42 \
+  --out .\out.png \
+  --log
+
+# Or auto-read Chrome history directly (no file needed; Chrome must be closed)
+py .\mindstream_art.py \
+  --auto-history chrome \
   --date 2025-08-07 \
   --mode hybrid \
   --style realistic \
@@ -74,12 +94,12 @@ py .\mindstream_art.py .\history.json \
 ## Key Flags
 - `--style` `abstract|figurative|realistic`: Controls prompt guidance and hybrid behavior. Use `figurative`/`realistic` for less abstract outputs.
 - `--seed` `<int>`: Seed for reproducibility/variation. Also tags the GPT prompt to nudge unique generations per seed.
-- `--refresh-cache`: Re-summarize pages (ignore `.daily_vibe_cache.json`).
+- `--refresh-cache`: Re-summarize pages (ignore `.mindstream_cache.json`).
 - `--refresh-image`: Force regenerate GPT image (ignore existing cached image file).
 - `--dry-run`: Skips GPT calls; writes a stub image and prompt for quick testing.
 
 ## Caching
-- Page summaries: `.daily_vibe_cache.json`
+- Page summaries: `.mindstream_cache.json`
 - GPT images: `cache/images/YYYY-MM-DD_gpt_<style>[_<seed>].png`
 
 ## Examples
@@ -104,6 +124,26 @@ python mindstream_art.py history.json --date 2025-08-07 --mode abstract --seed 9
 - Image: as specified by `--out` (e.g., `out.png`)
 - Prompt used: saved next to the output file as `<out>_prompt.txt` (e.g., `out_prompt.txt`)
 
+## Gallery
+Build a simple static gallery from cached images in `cache/images/`:
+
+```powershell
+py .\mindstream\gallery\build_gallery.py
+```
+
+Open the generated page:
+
+```powershell
+start .\mindstream\gallery\index.html
+```
+
+You can also auto-regenerate the gallery after each run by adding `--update-gallery`:
+
+```powershell
+py .\mindstream\mindstream_art.py --auto-history chrome --date 2025-08-13 --mode hybrid --style realistic --out .\mindstream\out.png --update-gallery --log
+```
+
 ## Notes
 - Uses OpenAI Python SDK 1.x (`from openai import OpenAI`) and `gpt-image-1` for images.
 - On some macOS setups, you may see an `urllib3` OpenSSL warning; it is typically non-blocking.
+ - By default the app skips Gmail and Google Docs/Drive/Accounts URLs to avoid summarizing private content.
