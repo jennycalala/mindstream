@@ -1,6 +1,6 @@
 # Mindstream
 
-Generate daily art guided by your browsing history using GPT for prompts and images, with optional local generative overlays. Supports JSON/CSV history inputs, caching, and cross-platform usage.
+Generate daily art guided by your browsing history using GPT for prompts and images, with optional local generative overlays. Auto‑ingests Chrome history (no JSON/CSV file needed), with caching and cross‑platform usage.
 
 ## Features
 - GPT-assisted prompt merging from visited pages
@@ -44,17 +44,8 @@ $env:OPENAI_API_KEY = "sk-..."
 ## Run
 Script: `mindstream_art.py`
 
-### macOS/Linux
+### macOS/Linux (auto history; Chrome must be closed)
 ```bash
-python mindstream_art.py history.json \
-  --date 2025-08-07 \
-  --mode hybrid \
-  --style realistic \
-  --seed 42 \
-  --out out.png \
-  --log
-
-# Or auto-read Chrome history directly (no file needed; Chrome must be closed)
 python mindstream_art.py \
   --auto-history chrome \
   --date 2025-08-07 \
@@ -65,17 +56,8 @@ python mindstream_art.py \
   --log
 ```
 
-### Windows PowerShell
+### Windows PowerShell (auto history; Chrome must be closed)
 ```powershell
-py .\mindstream_art.py .\history.json \
-  --date 2025-08-07 \
-  --mode hybrid \
-  --style realistic \
-  --seed 42 \
-  --out .\out.png \
-  --log
-
-# Or auto-read Chrome history directly (no file needed; Chrome must be closed)
 py .\mindstream_art.py \
   --auto-history chrome \
   --date 2025-08-07 \
@@ -85,6 +67,8 @@ py .\mindstream_art.py \
   --out .\out.png \
   --log
 ```
+
+Legacy (optional) file input is still supported: pass a `history.json`/`.csv` as the first argument instead of `--auto-history`.
 
 ## Modes
 - `abstract`: Local flow-field generative art themed by the daily prompt (no remote image).
@@ -105,19 +89,19 @@ py .\mindstream_art.py \
 ## Examples
 - Quick test (no API calls):
   ```bash
-python mindstream_art.py history.json --date 2025-08-07 --mode hybrid --style figurative --seed 1 --out out.png --dry-run --log
+  python mindstream_art.py --auto-history chrome --date 2025-08-07 --mode hybrid --style figurative --seed 1 --out out.png --dry-run --log
   ```
 - Fresh, less-abstract hybrid image (realistic):
   ```bash
-python mindstream_art.py history.json --date 2025-08-07 --mode hybrid --style realistic --seed 42 --refresh-image --out out.png --log
+  python mindstream_art.py --auto-history chrome --date 2025-08-07 --mode hybrid --style realistic --seed 42 --refresh-image --out out.png --log
   ```
 - GPT-only, realistic:
   ```bash
-python mindstream_art.py history.json --date 2025-08-07 --mode gpt --style realistic --seed 7 --refresh-image --out out.png --log
+  python mindstream_art.py --auto-history chrome --date 2025-08-07 --mode gpt --style realistic --seed 7 --refresh-image --out out.png --log
   ```
 - Pure abstract overlay only:
   ```bash
-python mindstream_art.py history.json --date 2025-08-07 --mode abstract --seed 99 --out out.png --log
+  python mindstream_art.py --auto-history chrome --date 2025-08-07 --mode abstract --seed 99 --out out.png --log
   ```
 
 ## Outputs
