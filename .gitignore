@@ -26,3 +26,4 @@ __pycache__/
 .mindstream_cache.json
 out.png
 *_prompt.txt
+history.json
