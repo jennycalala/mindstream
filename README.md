@@ -127,3 +127,4 @@ python mindstream_art.py history.json --date 2025-08-07 --mode abstract --seed 9
 ## Notes
 - Uses OpenAI Python SDK 1.x (`from openai import OpenAI`) and `gpt-image-1` for images.
 - On some macOS setups, you may see an `urllib3` OpenSSL warning; it is typically non-blocking.
+ - By default the app skips Gmail and Google Docs/Drive/Accounts URLs to avoid summarizing private content.

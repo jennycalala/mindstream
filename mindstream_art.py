@@ -89,6 +89,7 @@ NOTES:
 """
 
 import os, sys, json, argparse, hashlib, random, base64, shutil, sqlite3, tempfile
+from urllib.parse import urlparse
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple
@@ -512,6 +513,24 @@ def main():
     df = df.dropna(subset=["datetime"])
     day_mask = df["datetime"].dt.date == target_date
     df_day = df[day_mask].copy()
+    # Exclude sensitive/private Google properties by default (Gmail, Docs, Drive, Accounts)
+    excluded_hosts = {
+        "mail.google.com",
+        "docs.google.com",
+        "drive.google.com",
+        "accounts.google.com",
+    }
+    def _is_excluded(u: str) -> bool:
+        try:
+            host = urlparse(u).netloc.lower()
+        except Exception:
+            return False
+        return host in excluded_hosts
+    before = len(df_day)
+    df_day = df_day[~df_day["url"].astype(str).map(_is_excluded)].copy()
+    after = len(df_day)
+    if args.log and before != after:
+        log(f"Skipped {before - after} Gmail/Docs/Drive/Accounts URLs", True)
     if df_day.empty:
         sys.stderr.write(f"No entries found for date {target_date}.\n")
         sys.exit(1)
