@@ -124,6 +124,19 @@ python mindstream_art.py history.json --date 2025-08-07 --mode abstract --seed 9
 - Image: as specified by `--out` (e.g., `out.png`)
 - Prompt used: saved next to the output file as `<out>_prompt.txt` (e.g., `out_prompt.txt`)
 
+## Gallery
+Build a simple static gallery from cached images in `cache/images/`:
+
+```powershell
+py .\mindstream\gallery\build_gallery.py
+```
+
+Open the generated page:
+
+```powershell
+start .\mindstream\gallery\index.html
+```
+
 ## Notes
 - Uses OpenAI Python SDK 1.x (`from openai import OpenAI`) and `gpt-image-1` for images.
 - On some macOS setups, you may see an `urllib3` OpenSSL warning; it is typically non-blocking.
