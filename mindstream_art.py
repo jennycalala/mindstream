@@ -88,7 +88,7 @@ NOTES:
 - --dry-run requires no API key and writes a stub image and prompt
 """
 
-import os, sys, json, argparse, hashlib, random, base64, shutil, sqlite3, tempfile
+import os, sys, json, argparse, hashlib, random, base64, shutil, sqlite3, tempfile, subprocess
 from urllib.parse import urlparse
 from io import BytesIO
 from datetime import datetime, timezone, timedelta
@@ -480,6 +480,11 @@ def main():
     )
     ap.add_argument("--log", action="store_true", help="Print progress logs")
     ap.add_argument("--dry-run", action="store_true", help="Skip GPT calls; stub summaries for testing")
+    ap.add_argument(
+        "--update-gallery",
+        action="store_true",
+        help="Regenerate static gallery (gallery/index.html) after run",
+    )
     ap.add_argument("--auto-history", choices=["chrome"], help="Auto-ingest history from a browser (e.g. chrome)")
     ap.add_argument("--history-limit", type=int, default=20000, help="Max rows to read from auto browser history")
     args = ap.parse_args()
@@ -656,6 +661,18 @@ def main():
 
     log(f"Saved image → {args.out}", args.log)
     log(f"Saved prompt → {prompt_txt_path}", args.log)
+
+    # Optional: regenerate static gallery
+    if args.update_gallery:
+        try:
+            script_path = os.path.join(os.path.dirname(__file__), "gallery", "build_gallery.py")
+            if os.path.exists(script_path):
+                subprocess.run([sys.executable, script_path], check=False)
+                log("Updated gallery → gallery/index.html", True)
+            else:
+                log("Gallery script not found; skipped", True)
+        except Exception:
+            log("Gallery update failed; continuing", True)
 
 if __name__ == "__main__":
     main()

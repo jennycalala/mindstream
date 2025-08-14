@@ -137,6 +137,12 @@ Open the generated page:
 start .\mindstream\gallery\index.html
 ```
 
+You can also auto-regenerate the gallery after each run by adding `--update-gallery`:
+
+```powershell
+py .\mindstream\mindstream_art.py --auto-history chrome --date 2025-08-13 --mode hybrid --style realistic --out .\mindstream\out.png --update-gallery --log
+```
+
 ## Notes
 - Uses OpenAI Python SDK 1.x (`from openai import OpenAI`) and `gpt-image-1` for images.
 - On some macOS setups, you may see an `urllib3` OpenSSL warning; it is typically non-blocking.
